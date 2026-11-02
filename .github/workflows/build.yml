@@ -18,11 +18,25 @@ jobs:
       DISABLE_V8_COMPILE_CACHE: '1'
     steps:
       - name: Check out Ghost
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: slopization/ghost
           ref: main
           submodules: true
+          persist-credentials: false
+
+      - name: Check out build configuration
+        uses: actions/checkout@v7
+        with:
+          path: .container-config
+          persist-credentials: false
+
+      - name: Check out official Ghost image
+        uses: actions/checkout@v7
+        with:
+          repository: TryGhost/docker-library-ghost
+          ref: 1b063bc12b8dfbb8b539a0a04169e4a2f0f8983d
+          path: .ghost-image
           persist-credentials: false
 
       - name: Read Node version
@@ -34,15 +48,23 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           store-cache: 'false'
 
-      - name: Build Ghost admin
-        run: pnpm nx run @tryghost/admin:build
+      - name: Build Ghost archive
+        run: pnpm archive
 
       - name: Determine Ghost version
         run: |
           version=$(jq -r .version ghost/package.json)
           sha=$(git rev-parse HEAD)
+          echo "GHOST_VERSION=${version}" >> "$GITHUB_ENV"
           echo "GHOST_BUILD_VERSION=${version}+${sha:0:7}" >> "$GITHUB_ENV"
           echo "GHOST_SHA=${sha}" >> "$GITHUB_ENV"
+
+      - name: Prepare official Alpine image
+        run: |
+          git -C .ghost-image apply --check "$GITHUB_WORKSPACE/.container-config/.github/patches/ghost-alpine.patch"
+          git -C .ghost-image apply "$GITHUB_WORKSPACE/.container-config/.github/patches/ghost-alpine.patch"
+          cp "ghost/ghost-${GHOST_VERSION}.tgz" .ghost-image/6-next/alpine3.23/ghost.tgz
+          echo "GHOST_SHA256=$(sha256sum .ghost-image/6-next/alpine3.23/ghost.tgz | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -61,14 +83,15 @@ jobs:
       - name: Build image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: Dockerfile.production
-          target: selfhost
+          context: .ghost-image/6-next/alpine3.23
+          file: .ghost-image/6-next/alpine3.23/Dockerfile
           platforms: linux/amd64
           load: true
           tags: ghost:build
           build-args: |
+            NODE_VERSION=${{ env.NODE_VERSION }}
             GHOST_BUILD_VERSION=${{ env.GHOST_BUILD_VERSION }}
+            GHOST_SHA256=${{ env.GHOST_SHA256 }}
           labels: |
             org.opencontainers.image.source=https://github.com/slopization/ghost
             org.opencontainers.image.revision=${{ env.GHOST_SHA }}
@@ -88,7 +111,7 @@ jobs:
         run: docker save ghost:build -o "$RUNNER_TEMP/ghost-image.tar"
 
       - name: Upload image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ghost-image
           path: ${{ runner.temp }}/ghost-image.tar

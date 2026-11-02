@@ -1,0 +1,52 @@
+diff --git a/6-next/alpine3.23/Dockerfile b/6-next/alpine3.23/Dockerfile
+index 5b29d82..c3648b9 100644
+--- a/6-next/alpine3.23/Dockerfile
++++ b/6-next/alpine3.23/Dockerfile
+@@ -4,7 +4,8 @@
+ # PLEASE DO NOT EDIT IT DIRECTLY.
+ #
+ 
+-FROM node:22-alpine3.23
++ARG NODE_VERSION=22
++FROM node:${NODE_VERSION}-alpine3.23
+ 
+ # grab gosu for easy step-down from root (ahead of the Ghost install so it stays cached)
+ # https://github.com/tianon/gosu/releases
+@@ -43,13 +44,12 @@ ENV NODE_ENV=production
+ ENV GHOST_INSTALL=/home/ghost
+ ENV GHOST_CONTENT=/home/ghost/content
+ 
+-ENV GHOST_VERSION=6.73.0
++ARG GHOST_BUILD_VERSION
++ARG GHOST_SHA256
++ENV GHOST_BUILD_VERSION=${GHOST_BUILD_VERSION}
++ENV GHOST_VERSION=${GHOST_BUILD_VERSION}
+ 
+-# resolved by "versions.sh" so a build cannot pick up a different tarball than the one reviewed
+-ENV GHOST_TARBALL=https://github.com/TryGhost/Ghost/releases/download/v6.73.0/ghost-6.73.0.tgz
+-ENV GHOST_SHA256=7377bf3a20eb5174494e35c512c0cd55dde346ae0c0de9390874a4c02ee918c2
+-
+-RUN set -eux; \
++RUN --mount=type=bind,source=ghost.tgz,target=/tmp/ghost.tgz set -eux; \
+ # Ghost pins its pnpm by hash in "packageManager", so corepack fetches exactly that one
+ 	corepack enable; \
+ 	\
+@@ -63,11 +63,14 @@ RUN set -eux; \
+ # the install dir, and they are removed below
+ 	export XDG_CACHE_HOME=/tmp/xdg-cache XDG_DATA_HOME=/tmp/xdg-data; \
+ 	\
+-	gosu ghost wget -O ghost.tgz "$GHOST_TARBALL"; \
+-	echo "$GHOST_SHA256  ghost.tgz" | sha256sum -c -; \
++	echo "$GHOST_SHA256  /tmp/ghost.tgz" | sha256sum -c -; \
+ # the release tarball has no leading "package/" component, unlike an npm pack
+-	gosu ghost tar --extract --file ghost.tgz; \
+-	rm ghost.tgz; \
++	gosu ghost tar --extract --file /tmp/ghost.tgz; \
++	pkgVersion="$(node -p 'require("./package.json").version')"; \
++	case "$GHOST_VERSION" in \
++		"$pkgVersion" | "$pkgVersion"+?*) ;; \
++		*) echo >&2 "error: GHOST_BUILD_VERSION does not match package.json"; exit 1 ;; \
++	esac; \
+ 	\
+ # the tarball ships a pruned lockfile, so the tree is installed exactly, not re-solved per build
+ 	gosu ghost pnpm install --prod --frozen-lockfile; \
