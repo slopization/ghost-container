@@ -103,8 +103,10 @@ jobs:
         if: github.ref == 'refs/heads/master'
         run: |
           docker tag ghost:build "$IMAGE_NAME:latest"
+          docker tag ghost:build "$IMAGE_NAME:$GHOST_VERSION"
           docker tag ghost:build "$IMAGE_NAME:$GHOST_SHA"
           docker push "$IMAGE_NAME:latest"
+          docker push "$IMAGE_NAME:$GHOST_VERSION"
           docker push "$IMAGE_NAME:$GHOST_SHA"
 
       - name: Export image
